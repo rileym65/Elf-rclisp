@@ -6,20 +6,16 @@
 ; *** without express written permission from the author.         ***
 ; *******************************************************************
 
-; #define PICOROM
-; #define ELFOS
-
 include    bios.inc
 
 errnolist: equ     1
 errnobind: equ     2
 errinvcmd: equ     3
 erreverr:  equ     4
-dta:       equ     7000h
-dtapage:   equ     070h
-stack:     equ     7effh
 
 #ifdef PICOROM
+#define    CODE    09000h
+#define    INROM
 base:      equ     100h
 jump1:     equ     base
 buffer:    equ     base+020h
@@ -35,10 +31,42 @@ xread:     equ     0800ch
 xwrite:    equ     0800fh
 xclosew:   equ     08012h
 xcloser:   equ     08015h
+stack:     equ     7effh
+dta:       equ     7000h
+dtapage:   equ     070h
+exitaddr:  equ     08003h
 #endif
 
+#ifdef MCHIP
+#define    CODE    01000h
+#define    INROM
+base:      equ     8100h
+jump1:     equ     base
+buffer:    equ     base+020h
+oblist:    equ     base+100h
+oblistend: equ     base+100h+21*16
+nodelist:  equ     base+256+200*16
+o_msg:     equ     f_msg
+o_type:    equ     f_type
+o_input:   equ     f_input
+xopenw:    equ     07006h
+xopenr:    equ     07009h
+xread:     equ     0700ch
+xwrite:    equ     0700fh
+xclosew:   equ     07012h
+xcloser:   equ     07015h
+stack:     equ     0feffh
+dta:       equ     0fc00h
+dtapage:   equ     0fch
+exitaddr:  equ     07003h
+#endif
 
 #ifdef ELFOS
+#define    CODE    02000h
+stack:     equ     7effh
+exitaddr:  equ     o_wrmboot
+dta:       equ     7c00h
+dtapage:   equ     07ch
 include    kernel.inc
 
            org     8000h
@@ -50,17 +78,18 @@ include    kernel.inc
            dw      endrom-2000h
            dw      2000h
            db      0
+#endif
 
-           org     2000h
+           org     CODE
+
+#ifdef ELFOS
            br      start
-
 include    date.inc
 include    build.inc
            db      'Written by Michael H. Riley',0
 #endif
 
-#ifdef PICOROM
-           org     09000h
+#ifndef ELFOS
            mov     r2,stack
            mov     r6,start
            lbr     f_initcall
@@ -82,7 +111,7 @@ start:     ldi     high stack          ; set stack to top of 32k
            plo     rf
            sep     scall
            dw      o_msg
-#ifdef PICOROM
+#ifdef INROM
 ; *****************************************
 ; *** Copy initial oblist to low memory ***
 ; *****************************************
@@ -112,10 +141,14 @@ cpylp:     lda     r8                  ; get source byte
 #ifdef PICOROM
            mov     r7,07e00h           ; stop before Visual/02 data space
 #else
+#ifdef MCHIP
+           mov     r7,0fc00h           ; stop before Visual/02 data space
+#else
            sep     scall               ; get free memory from BIOS
            dw      f_freemem
            inc     rf
            mov     r7,rf               ; move to r7
+#endif
 #endif
 #endif
            ldi     high oblistend      ; need to zero to end of memory
@@ -619,7 +652,11 @@ notempty:  glo     rd                  ; point to next entry
 ; *****************************************
 ident:     ghi     r7                  ; store item address on stack
            shl                         ; shift high bit into df
+#ifdef MCHIP
+           lbnf    identatom           ; if df is clear then this is inbuilt
+#else
            lbdf    identatom           ; if df is set then this is inbuilt
+#endif
            ghi     r7                  ; recover address
            stxd
            glo     r7
@@ -2033,7 +2070,11 @@ sfreego2:  inc     r7                  ; point to next node
            inc     r7
            inc     r7
            ghi     r7                  ; check for top of memory
+#ifdef MCHIP
+           smi     0f0h
+#else
            smi     070h
+#endif
            lbnz    sfreelp2            ; loop if more to check
            ldi     high dta            ; point to buffer
            phi     rf
@@ -2120,7 +2161,7 @@ sfnend:    ldi     0                   ; need valid terminator
            dw      o_msg
            lbr     mainlp              ; and back to main loop
 #endif
-#ifdef PICOROM
+#ifdef INROM
            dw      xopenw
 #endif
 sopened:   ldi     high oblistend      ; point to oblist
@@ -2232,7 +2273,7 @@ fsavebnd:  ldi     high dta            ; setup buffer
 #ifdef ELFOS
            dw      o_write
 #endif
-#ifdef PICOROM
+#ifdef INROM
            dw      xwrite
 #endif
            irx                         ; recover oblist position
@@ -2248,7 +2289,7 @@ fsavedn:   sep     scall               ; close the file
 #ifdef ELFOS
            dw      o_close
 #endif
-#ifdef PICOROM
+#ifdef INROM
            dw      xclosew
 #endif
            lbr     mainlp              ; back to main loop
@@ -2262,7 +2303,7 @@ sload:     sep     scall               ; move past whitespace
            phi     ra
            glo     rf
            plo     ra
-#ifdef PICOROM
+#ifdef INROM
            sep     scall               ; open XMODEM channel
            dw      xopenr
 #endif
@@ -2305,7 +2346,7 @@ lopened:   ldi     high dta            ; point to transfer area
            sep     scall               ; close the file
            dw      o_close
 #endif
-#ifdef PICOROM
+#ifdef INROM
            sep     scall               ; close XMODEM channel
            dw      xcloser
 #endif
@@ -2537,7 +2578,7 @@ readbyte:  glo     rf
            glo     rc
            lbz     readbno
 #endif
-#ifdef PICOROM
+#ifdef INROM
            sep     scall              ; Read from XMODEM channel
            dw      xread
            mov     rf,buffer          ; point to buffer
@@ -2624,12 +2665,7 @@ syslist:   db      'OBLIS',('T'+80h)
            db      'G',('C'+80h)
            dw      sgc
            db      'BY',('E'+80h)
-#ifdef PICOROM
-           dw      08003h
-#endif
-#ifdef ELFOS
-           dw      o_wrmboot
-#endif
+           dw      exitaddr
            db      'CLEA',('R'+80h)
            dw      start
            db      0
@@ -2651,7 +2687,7 @@ buffer:    ds      20
 ;   4 - Lambda function
 ;   8 - inbuilt function
            org     $
-#ifdef PICOROM
+#ifdef INROM
 oblist2:   db      9,'LAMBDA',0,0,0,0,0,0,0
 #else
 oblist:    db      9,'LAMBDA',0,0,0,0,0,0,0
